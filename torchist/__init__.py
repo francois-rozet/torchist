@@ -59,6 +59,35 @@ def unravel_index(
     return coords
 
 
+def discretize(
+    x: torch.Tensor,
+    bins: torch.Tensor,
+    low: torch.Tensor,
+    upp: torch.Tensor,
+) -> torch.Tensor:
+    r"""Maps the values of `x` to integers in [0, bins).
+
+    Inverse of `torch.linspace`.
+
+    Args:
+        x: A tensor, (*, D).
+        bins: The number of bins in each dimension, (,) or (D,).
+        low: The lower bound in each dimension, (,) or (D,).
+        upp: The upper bound in each dimension, (,) or (D,).
+
+    Returns:
+        The discretized tensor, (*, D).
+    """
+
+    span = torch.where(upp > low, upp - low, bins)  # > 0.
+
+    x = (x - low) / span  # in [0., 1.]
+    x = torch.where(x < 1., x, 1. - .5 / bins)  # in [0., 1.)
+    x = torch.floor(x * bins)  # in [0, bins)
+
+    return x
+
+
 def histogramdd(
     x: torch.Tensor,
     bins: Union[int, List[int]] = 10,
@@ -119,19 +148,14 @@ def histogramdd(
         weights = weights[mask]
 
     # Discretize
-    span = torch.where(upp > low, upp - low, bins)  # prevents null span
-
-    x = (x - low) / span  # in [0., 1.]
-    x = torch.where(x < 1., x, 1. - .5 / bins)  # in [0., 1.)
-    x = torch.floor(x * bins)  # in [0., bins)
-
-    if D > 1:
-        x = ravel_multi_index(x, shape)
-    else:
-        x = x.view(-1)
+    x = discretize(x, bins, low, upp)
 
     # Count
-    x = x.long()
+    if D > 1:
+        x = ravel_multi_index(x, shape).long()
+    else:
+        x = x.view(-1).long()
+
     hist = x.bincount(weights, minlength=shape.numel()).view(shape)
 
     return hist
