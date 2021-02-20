@@ -59,6 +59,28 @@ def unravel_index(
     return coords
 
 
+def out_of_bounds(
+    x: torch.Tensor,
+    low: torch.Tensor,
+    upp: torch.Tensor,
+) -> torch.Tensor:
+    r"""Returns a mask of out-of-bounds values in `x`.
+
+    Args:
+        x: A tensor, (*, D).
+        low: The lower bound in each dimension, (,) or (D,).
+        upp: The upper bound in each dimension, (,) or (D,).
+
+    Returns:
+        The mask tensor, (*,).
+    """
+
+    return torch.logical_or(
+        torch.any(x < low, dim=-1),
+        torch.any(x > upp, dim=-1)
+    )
+
+
 def discretize(
     x: torch.Tensor,
     bins: torch.Tensor,
@@ -139,10 +161,7 @@ def histogramdd(
 
     # Filter out-of-bound values
     if not bounded:
-        mask = torch.logical_and(
-            torch.all(low <= x, dim=-1),
-            torch.all(x <= upp, dim=-1)
-        )
+        mask = ~out_of_bounds(x, low, upp)
 
         x = x[mask]
         weights = weights[mask]
