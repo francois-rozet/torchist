@@ -1,6 +1,6 @@
 """NumPy-style histograms in PyTorch"""
 
-__version__ = '0.0.3'
+__version__ = '0.0.4'
 
 
 import torch
@@ -252,6 +252,163 @@ def reduce_histogramdd(
         hist = hist.coalesce()
 
     return hist
+
+
+def normalize(hist: torch.Tensor) -> torch.Tensor:
+    r"""Normalizes a histogram, that is, the sum of its elements is equal to one.
+
+    Args:
+        hist: A dense or sparse histogram, (*,).
+
+    Returns:
+        The normalized histogram, (*,).
+    """
+
+    if hist.is_sparse:
+        norm = torch.sparse.sum(hist)
+    else:
+        norm = hist.sum()
+
+    return hist / norm
+
+
+def marginalize(
+    hist: torch.Tensor,
+    dim: Union[int, List[int]],
+    keep: bool = False,
+) -> torch.Tensor:
+    r"""Marginalizes (reduces by sum) a histogram over given dimensions.
+
+    Args:
+        hist: A dense or sparse histogram, (*,).
+        dim: The list of dimensions to marginalize over.
+        keep: Whether the dimensions in `dim` are the ones that are kept
+            or the ones that are reduced.
+
+    Returns:
+        The marginalized histogram, (*,) or smaller.
+    """
+
+    if type(dim) is int:
+        dim = [dim]
+
+    if keep:
+        dim = [i for i in range(hist.dim()) if i not in dim]
+
+    if dim:
+        if hist.is_sparse:
+            hist = torch.sparse.sum(hist, dim=dim)
+        else:
+            hist = hist.sum(dim=dim)
+
+    return hist
+
+
+def sinkhorn_transport(
+    r: torch.Tensor,
+    c: torch.Tensor,
+    M: torch.Tensor,
+    gamma: float = 100.,
+    max_iter: int = 1000,
+    threshold: float = 1e-8,
+    step: int = 100,
+) -> torch.Tensor:
+    r"""Computes the entropic regularized optimal transport between
+    a source and a target distribution with respect to a cost matrix.
+
+    This function implements the Sinkhorn-Knopp algorithm from [1].
+
+    Args:
+        r: A source dense histogram, (N,).
+        c: A target dense histogram, (M,).
+        M: A cost matrix, (N, M).
+        gamma: The regularization term.
+        max_iter: The maximum number of iterations.
+        threshold: The stopping threshold on the error.
+        step: The number of iterations between two checks of the error.
+
+    Returns:
+        The transport, (N, M).
+
+    References:
+        [1] Sinkhorn Distances: Lightspeed Computation of Optimal Transportation Distances
+        (Cuturi, 2013)
+        https://arxiv.org/pdf/1306.0895.pdf
+    """
+
+    K = (-gamma * M).exp()
+    Kt = K.t().contiguous()
+
+    u = torch.full_like(r, 1. / len(r))
+
+    for i in range(max_iter):
+        v = c / (Kt @ u)
+        u = r / (K @ v)
+
+        if i % step == 0:
+            marginal = (Kt @ u) * v
+
+            err = torch.linalg.norm(marginal - c)
+            if err < threshold:
+                break
+
+    return u.view(-1, 1) * K * v
+
+
+def rw_distance(
+    p: torch.Tensor,
+    q: torch.Tensor,
+    **kwargs,
+) -> torch.Tensor:
+    r"""Computes the regularized Wasserstein distance between two distributions,
+    assuming an Euclidean distance matrix.
+
+    Args:
+        p: A dense or sparse histogram, (*,).
+        q: A dense or sparse histogram, (*,).
+
+        `**kwargs` are passed on to `sinkhorn_transport`.
+
+    Returns:
+        The distance, (,).
+    """
+
+    # Sparsify
+    p = p.coalesce() if p.is_sparse else p.to_sparse()
+    q = q.coalesce() if q.is_sparse else q.to_sparse()
+
+    # Euclidean distance matrix
+    scale = 1. / torch.tensor(p.shape).to(p)
+
+    x_p = p.indices().t() * scale
+    x_q = q.indices().t() * scale
+
+    M = torch.cdist(x_p[None], x_q[None])[0]
+
+    # Regularized optimal transport
+    T = sinkhorn_transport(p.values(), q.values(), M, **kwargs)
+
+    return (T * M).sum()
+
+
+def kl_divergence(
+    p: torch.Tensor,
+    q: torch.Tensor,
+) -> torch.Tensor:
+    r"""Computes the Kullback-Leibler divergence between two distributions.
+
+    Args:
+        p: A dense histogram, (*,).
+        q: A dense histogram, (*,).
+
+    Returns:
+        The divergence, (,).
+    """
+
+    mask = p > 0.
+    p, q = p[mask], q[mask]
+
+    return (p * (p.log() - q.log())).sum()
 
 
 if __name__ == '__main__':
