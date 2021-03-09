@@ -1,11 +1,11 @@
 """NumPy-style histograms in PyTorch"""
 
-__version__ = '0.0.2'
+__version__ = '0.0.3'
 
 
 import torch
 
-from typing import List, Union
+from typing import Iterable, List, Union
 
 
 def ravel_multi_index(
@@ -198,13 +198,60 @@ def histogram(
         low: The lower bound.
         upp: The upper bound.
 
-        **kwargs are passed on to `histogramdd`.
+        `**kwargs` are passed on to `histogramdd`.
 
     Returns:
         The histogram, (bins,).
     """
 
     return histogramdd(x.unsqueeze(-1), bins, low, upp, **kwargs)
+
+
+def reduce_histogramdd(
+    seq: Iterable[torch.Tensor],
+    *args,
+    device: torch.device = None,
+    hist: torch.Tensor = None,
+    **kwargs,
+) -> torch.Tensor:
+    r"""Computes the multidimensional histogram of a sequence of tensors.
+
+    This is useful for large datasets that don't fit on CUDA memory or
+    distributed datasets.
+
+    Args:
+        seq: A sequence of tensors, each (*, D).
+        device: The device of the output histogram. If `None`,
+            use the device of the first element of `seq`.
+        hist: A histogram to aggregate the data of `seq` to.
+            If provided, `device`, `bins` and `sparse` are ignored.
+            Otherwise, a new (empty) histogram is used.
+
+        `*args` and `**kwargs` are passed on to `histogramdd`.
+
+    Returns:
+        The histogram, (*bins,).
+    """
+
+    if hist is not None:
+        kwargs['bins'] = torch.tensor(hist.shape)
+        kwargs['sparse'] = hist.is_sparse
+
+    for x in seq:
+        temp = histogramdd(x, *args, **kwargs)
+
+        if hist is None:
+            hist = temp
+
+            if device is not None:
+                hist = hist.to(device)
+        else:
+            hist = hist + temp.to(hist)
+
+    if hist.is_sparse:
+        hist = hist.coalesce()
+
+    return hist
 
 
 if __name__ == '__main__':
