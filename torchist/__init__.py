@@ -1,6 +1,6 @@
 """NumPy-style histograms in PyTorch"""
 
-__version__ = '0.0.6'
+__version__ = '0.0.7'
 
 
 import torch
@@ -264,7 +264,6 @@ def reduce_histogramdd(
     seq: Iterable[Tensor],
     *args,
     device: Device = None,
-    hist: Tensor = None,
     **kwargs,
 ) -> Tensor:
     r"""Computes the multidimensional histogram of a sequence of tensors.
@@ -276,9 +275,6 @@ def reduce_histogramdd(
         seq: A sequence of tensors, each (*, D).
         device: The device of the output histogram. If `None`,
             use the device of the first element of `seq`.
-        hist: A histogram to aggregate the data of `seq` to.
-            If provided, `device`, `bins` and `sparse` are ignored.
-            Otherwise, a new (empty) histogram is used.
 
         `*args` and `**kwargs` are passed on to `histogramdd`.
 
@@ -288,12 +284,10 @@ def reduce_histogramdd(
     Warning:
         In this function, `histogramdd` is called on each element of `seq`.
         If `low` and `high` are not set, the computed histograms will have
-        different sets of bin edges and their reduction (sum) will be incoherent.
+        different sets of bin edges and their sum will be incoherent.
     """
 
-    if hist is not None:
-        kwargs['bins'] = torch.tensor(hist.shape)
-        kwargs['sparse'] = hist.is_sparse
+    hist = None
 
     for x in seq:
         temp = histogramdd(x, *args, **kwargs)
