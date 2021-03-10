@@ -1,6 +1,6 @@
 """NumPy-style histograms in PyTorch"""
 
-__version__ = '0.0.4'
+__version__ = '0.0.5'
 
 
 import torch
@@ -113,8 +113,8 @@ def discretize(
 def histogramdd(
     x: torch.Tensor,
     bins: Union[int, List[int], torch.Tensor] = 10,
-    low: Union[float, torch.Tensor] = 0.,
-    upp: Union[float, torch.Tensor] = 0.,
+    low: Union[float, List[float], torch.Tensor] = 0.,
+    upp: Union[float, List[float], torch.Tensor] = 0.,
     bounded: bool = False,
     weights: torch.Tensor = None,
     sparse: bool = False,
@@ -125,13 +125,13 @@ def histogramdd(
 
     Args:
         x: A tensor, (*, D).
-        bins: The number of bins in each dimension. If list, len(bins) is D.
-        low: The lower bound in each dimension. If tensor, (D,).
-        upp: The upper bound in each dimension. If tensor, (D,).
+        bins: The number of bins in each dimension.
+        low: The lower bound in each dimension.
+        upp: The upper bound in each dimension.
+            If `upp` is equal to `low`, the min and max of `x` are used instead
+            and `bounded` is ignored.
         bounded: Whether `x` is bounded by `low` and `upp`, included.
-            When set to `False`, out-of-bounds values are filtered out.
-            If `low` is equal to `upp`, the min and max of `x` are used instead
-            and the value of `bounded` is ignored.
+            If `False`, out-of-bounds values are filtered out.
         weights: A tensor of weights, (*,). Each sample of `x` contributes
             its associated weight towards the bin count (instead of 1).
         sparse: Whether the histogram is returned as a sparse tensor or not.
@@ -181,6 +181,44 @@ def histogramdd(
     return hist
 
 
+def histogramdd_edges(
+    x: torch.Tensor,
+    bins: Union[int, List[int], torch.Tensor] = 10,
+    low: Union[float, List[float], torch.Tensor] = 0.,
+    upp: Union[float, List[float], torch.Tensor] = 0.,
+) -> List[torch.Tensor]:
+    r"""Computes the edges of the uniform bins used by `histogramdd`.
+
+    This is useful when plotting an histogram along with axes.
+
+    Args:
+        x: A tensor, (*, D).
+        bins: The number of bins in each dimension.
+        low: The lower bound in each dimension.
+        upp: The upper bound in each dimension.
+            If `upp` is equal to `low`, the min and max of `x` are used instead.
+
+    Returns:
+        The list of D bin edges, each (bins + 1,).
+    """
+
+    D = x.size(-1)
+    x = x.view(-1, D)
+
+    bins = torch.as_tensor(bins).expand(D)
+    low, upp = torch.as_tensor(low), torch.as_tensor(upp)
+
+    if torch.all(low == upp):
+        low, upp = x.min(dim=0)[0], x.max(dim=0)[0]
+    else:
+        low, upp = low.expand(D), upp.expand(D)
+
+    return [
+        torch.linspace(l, u, b + 1)
+        for (l, u, b) in zip(low, upp, bins)
+    ]
+
+
 def histogram(
     x: torch.Tensor,
     bins: int = 10,
@@ -197,6 +235,8 @@ def histogram(
         bins: The number of bins.
         low: The lower bound.
         upp: The upper bound.
+            If `upp` is equal to `low`, the min and max of `x` are used instead
+            and `bounded` is ignored.
 
         `**kwargs` are passed on to `histogramdd`.
 
@@ -204,7 +244,31 @@ def histogram(
         The histogram, (bins,).
     """
 
-    return histogramdd(x.unsqueeze(-1), bins, low, upp, **kwargs)
+    return histogramdd(x.view(-1, 1), bins, low, upp, **kwargs)
+
+
+def histogram_edges(
+    x: torch.Tensor,
+    bins: int = 10,
+    low: float = 0.,
+    upp: float = 0.,
+) -> torch.Tensor:
+    r"""Computes the edges of the uniform bins used by `histogramdd`.
+
+    This is a `torch` implementation of `numpy.histogram_bin_edges`.
+
+    Args:
+        x: A tensor, (*,).
+        bins: The number of bins.
+        low: The lower bound.
+        upp: The upper bound.
+            If `upp` is equal to `low`, the min and max of `x` are used instead.
+
+    Returns:
+        The bin edges, (bins + 1,).
+    """
+
+    return histogramdd_bin_edges(x.view(-1, 1), bins, low, upp)[0]
 
 
 def reduce_histogramdd(
@@ -231,6 +295,11 @@ def reduce_histogramdd(
 
     Returns:
         The histogram, (*bins,).
+
+    Warning:
+        In this function, `histogramdd` is called on each element of `seq`.
+        If `low` and `high` are not set, the computed histograms will have
+        different sets of bin edges and their reduction (sum) will be incoherent.
     """
 
     if hist is not None:
