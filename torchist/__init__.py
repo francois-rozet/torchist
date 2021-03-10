@@ -1,6 +1,6 @@
 """NumPy-style histograms in PyTorch"""
 
-__version__ = '0.0.7'
+__version__ = '0.1.0'
 
 
 import torch
@@ -28,12 +28,13 @@ def ravel_multi_index(coords: Tensor, shape: Shape) -> Tensor:
         The raveled indices, (*,).
     """
 
-    index = coords[..., 0]
+    coef = coords.new_tensor(shape[1:] + (1,))
+    coef = coef.flipud().cumprod(0).flipud()
 
-    for i, dim in enumerate(shape[1:], 1):
-        index = dim * index + coords[..., i]
-
-    return index
+    if coords.is_cuda and not coords.is_floating_point():
+        return (coords * coef).sum(dim=-1)
+    else:
+        return coords @ coef
 
 
 def unravel_index(indices: Tensor, shape: Shape) -> Tensor:
@@ -72,10 +73,12 @@ def out_of_bounds(x: Tensor, low: Tensor, upp: Tensor) -> Tensor:
         The mask tensor, (*,).
     """
 
-    return torch.logical_or(
-        torch.any(x < low, dim=-1),
-        torch.any(x > upp, dim=-1)
-    )
+    a, b = x < low, x > upp
+
+    if x.dim() > 1:
+        a, b = torch.any(a, dim=-1), torch.any(b, dim=-1)
+
+    return torch.logical_or(a, b)
 
 
 def quantize(x: Tensor, bins: Tensor, low: Tensor, upp: Tensor) -> Tensor:
@@ -93,11 +96,45 @@ def quantize(x: Tensor, bins: Tensor, low: Tensor, upp: Tensor) -> Tensor:
 
     span = torch.where(upp > low, upp - low, bins)  # > 0.
 
-    x = (x - low) / span  # in [0., 1.]
-    x = torch.where(x < 1., x, 1. - 1. / bins)  # in [0., 1.)
-    x = torch.floor(x * bins)  # in [0, bins)
+    x = (x - low) * (bins / span)  # in [0., bins]
+    x = torch.where(x < bins, x, bins - 1.)  # in [0., bins)
+    x = x.long()  # in [0, bins)
 
     return x
+
+
+def pack_edges(edges: List[Tensor]) -> Tensor:
+    r"""Packs a list of edges vector as a single tensor.
+
+    Shorther vectors are padded with the `inf` value.
+
+    Args:
+        edges: A list of D edges vectors, each (bins + 1,).
+
+    Returns:
+        The edges tensor, (D, max(bins) + 1).
+    """
+
+    maxlen = max(e.numel() for e in edges)
+
+    out = edges[0].new_full((len(edges), maxlen), float('inf'))
+    for i, e in enumerate(edges):
+        out[i, :e.numel()] = e.view(-1)
+
+    return out
+
+
+def len_packed_edges(edges: Tensor) -> Tensor:
+    r"""Computes the length of each vector in a edges tensor.
+
+    Args:
+        edges: A edges tensor, (D, max(bins) + 1).
+
+    Returns:
+        The lengths, (D,).
+    """
+
+    return torch.count_nonzero(edges.isfinite(), dim=-1)
 
 
 def histogramdd(
@@ -108,6 +145,7 @@ def histogramdd(
     bounded: bool = False,
     weights: Tensor = None,
     sparse: bool = False,
+    edges: Union[Tensor, List[Tensor]] = None,
 ) -> Tensor:
     r"""Computes the multidimensional histogram of a tensor.
 
@@ -125,28 +163,44 @@ def histogramdd(
         weights: A tensor of weights, (*,). Each sample of `x` contributes
             its associated weight towards the bin count (instead of 1).
         sparse: Whether the histogram is returned as a sparse tensor or not.
+        edges: The edges of the histogram. Either a vector, list of vectors or
+            packed tensor of bin edges, (bins + 1,) or (D, max(bins) + 1).
+            If provided, `bins`, `low` and `upp` are inferred from `edges`.
 
     Returns:
         The histogram, (*bins,).
     """
 
+    # Preprocess
     D = x.size(-1)
-    x = x.view(-1, D)
+    x = x.view(-1, D).squeeze(-1)
 
-    bins = torch.as_tensor(bins).int()
-    shape = torch.Size(bins.expand(D))
-    bins = bins.to(x)
+    if edges is None:
+        bins = torch.as_tensor(bins).squeeze().long()
+        low = torch.as_tensor(low).squeeze()
+        upp = torch.as_tensor(upp).squeeze()
 
-    low, upp = torch.as_tensor(low), torch.as_tensor(upp)
+        if torch.all(low == upp):
+            low, upp = x.min(dim=0)[0], x.max(dim=0)[0]
+            bounded = True
+        else:
+            low, upp = low.to(x), upp.to(x)
+    else:  # non-uniform binning
+        if type(edges) is list:
+            edges = pack_edges(edges)
 
-    if torch.all(low == upp):
-        low, upp = x.min(dim=0)[0], x.max(dim=0)[0]
-        bounded = True
-    else:
-        low, upp = low.to(x), upp.to(x)
+        edges = edges.squeeze(0).to(x)
 
+        if edges.dim() > 1:  # (D, max(bins) + 1)
+            bins = len_packed_edges(edges) - 1
+            low, upp = edges[:, 0], edges[torch.arange(D), bins]
+        else:  # (bins + 1,)
+            bins = torch.tensor(len(edges) - 1)
+            low, upp = edges[0], edges[-1]
+
+    # Weights
     if weights is None:
-        weights = torch.ones_like(x[:, 0])
+        weights = x.new_ones(x.size(0))
     else:
         weights = weights.view(-1)
 
@@ -157,14 +211,23 @@ def histogramdd(
         x = x[mask]
         weights = weights[mask]
 
-    # Quantization
-    idx = quantize(x, bins, low, upp).long()
+    # Indexing
+    if edges is None:
+        idx = quantize(x, bins.to(x), low, upp)
+    else:  # non-uniform binning
+        if edges.dim() > 1:
+            idx = torch.searchsorted(edges, x.t().contiguous(), right=True).t() - 1
+        else:
+            idx = torch.bucketize(x, edges, right=True) - 1
 
-    # Count
+    # Histogram
+    shape = torch.Size(bins.expand(D))
+
     if sparse:
         hist = torch.sparse_coo_tensor(idx.t(), weights, shape).coalesce()
     else:
-        idx = ravel_multi_index(idx, shape)
+        if D > 1:
+            idx = ravel_multi_index(idx, shape)
         hist = idx.bincount(weights, minlength=shape.numel()).view(shape)
 
     return hist
@@ -456,23 +519,33 @@ if __name__ == '__main__':
     import numpy as np
     import timeit
 
-    x = torch.rand(100000, 5)
-    x0 = x[:, 0].clone()
-
     print('CPU')
     print('---')
 
+    x = np.random.rand(1000000, 5)
+    x0 = x[:, 0].copy()
+    edges = np.linspace(0., 1., 11)
+
     for key, f in {
-        'np.histogram': np.histogram,
-        'torchist.histogram': histogram,
-        'np.histogramdd': np.histogramdd,
-        'torchist.histogramdd': histogramdd,
+        'np.histogram': lambda: np.histogram(x0, bins=10),
+        'np.histogramdd': lambda: np.histogramdd(x, bins=10),
+        'np.histogram (non-uniform)': lambda: np.histogram(x0, bins=edges),
+        'np.histogramdd (non-uniform)': lambda: np.histogramdd(x, bins=[edges] * 5),
     }.items():
-        y = x if 'dd' in key else x0
-        y = y if 'torch' in key else y.numpy()
+        time = timeit.timeit(f, number=100)
+        print(key, ':', '{:.04f}'.format(time), 's')
 
-        time = timeit.timeit(lambda: f(y), number=100)
+    x = torch.tensor(x).float()
+    x0 = x[:, 0].clone()
+    edges = torch.linspace(0., 1., 11)
 
+    for key, f in {
+        'torchist.histogram': lambda: histogram(x0, bins=10),
+        'torchist.histogramdd': lambda: histogramdd(x, bins=10),
+        'torchist.histogram (non-uniform)': lambda: histogram(x0, edges=edges),
+        'torchist.histogramdd (non-uniform)': lambda: histogramdd(x, edges=[edges] * 5),
+    }.items():
+        time = timeit.timeit(f, number=100)
         print(key, ':', '{:.04f}'.format(time), 's')
 
     if torch.cuda.is_available():
@@ -480,26 +553,23 @@ if __name__ == '__main__':
         print('CUDA')
         print('----')
 
-        x, x0 = x.cuda(), x0.cuda()
+        x, x0, edges = x.cuda(), x0.cuda(), edges.cuda()
 
         for key, f in {
-            'torchist.histogram': histogram,
-            'torchist.histogramdd': histogramdd,
+            'torchist.histogram': lambda: histogram(x0, bins=10),
+            'torchist.histogramdd': lambda: histogramdd(x, bins=10),
+            'torchist.histogram (non-uniform)': lambda: histogram(x0, edges=edges),
+            'torchist.histogramdd (non-uniform)': lambda: histogramdd(x, edges=[edges] * 5),
         }.items():
-            y = x if 'dd' in key else x0
-
             start = torch.cuda.Event(enable_timing=True)
             end = torch.cuda.Event(enable_timing=True)
 
             start.record()
-
             for _ in range(100):
-                f(y)
-
+                f()
             end.record()
 
             torch.cuda.synchronize()
-
-            time = start.elapsed_time(end) / 1000 # ms -> s
+            time = start.elapsed_time(end) / 1000  # ms -> s
 
             print(key, ':', '{:.04f}'.format(time), 's')
