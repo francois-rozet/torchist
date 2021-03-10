@@ -1,17 +1,21 @@
 """NumPy-style histograms in PyTorch"""
 
-__version__ = '0.0.5'
+__version__ = '0.0.6'
 
 
 import torch
 
-from typing import Iterable, List, Union
+from typing import Iterable, List, Tuple, Union
 
 
-def ravel_multi_index(
-    coords: torch.Tensor,
-    shape: torch.Size,
-) -> torch.Tensor:
+Scalar = Union[int, float]
+Tensor = torch.Tensor
+Vector = Union[Scalar, List[Scalar], Tuple[Scalar, ...], Tensor]  # anything working with `torch.as_tensor`
+Shape = Union[List[int], Tuple[int, ...], torch.Size]
+Device = torch.device
+
+
+def ravel_multi_index(coords: Tensor, shape: Shape) -> Tensor:
     r"""Converts a tensor of coordinate vectors into a tensor of flat indices.
 
     This is a `torch` implementation of `numpy.ravel_multi_index`.
@@ -32,10 +36,7 @@ def ravel_multi_index(
     return index
 
 
-def unravel_index(
-    indices: torch.Tensor,
-    shape: torch.Size,
-) -> torch.Tensor:
+def unravel_index(indices: Tensor, shape: Shape) -> Tensor:
     r"""Converts a tensor of flat indices into a tensor of coordinate vectors.
 
     This is a `torch` implementation of `numpy.unravel_index`.
@@ -59,17 +60,13 @@ def unravel_index(
     return coords
 
 
-def out_of_bounds(
-    x: torch.Tensor,
-    low: torch.Tensor,
-    upp: torch.Tensor,
-) -> torch.Tensor:
+def out_of_bounds(x: Tensor, low: Tensor, upp: Tensor) -> Tensor:
     r"""Returns a mask of out-of-bounds values in `x`.
 
     Args:
         x: A tensor, (*, D).
-        low: The lower bound in each dimension, (,) or (D,).
-        upp: The upper bound in each dimension, (,) or (D,).
+        low: The lower bound in each dimension, scalar or (D,).
+        upp: The upper bound in each dimension, scalar or (D,).
 
     Returns:
         The mask tensor, (*,).
@@ -81,24 +78,17 @@ def out_of_bounds(
     )
 
 
-def discretize(
-    x: torch.Tensor,
-    bins: torch.Tensor,
-    low: torch.Tensor,
-    upp: torch.Tensor,
-) -> torch.Tensor:
+def quantize(x: Tensor, bins: Tensor, low: Tensor, upp: Tensor) -> Tensor:
     r"""Maps the values of `x` to integers in [0, bins).
-
-    Inverse of `torch.linspace`.
 
     Args:
         x: A tensor, (*, D).
-        bins: The number of bins in each dimension, (,) or (D,).
-        low: The lower bound in each dimension, (,) or (D,).
-        upp: The upper bound in each dimension, (,) or (D,).
+        bins: The number of bins in each dimension, scalar or (D,).
+        low: The lower bound in each dimension, scalar or (D,).
+        upp: The upper bound in each dimension, scalar or (D,).
 
     Returns:
-        The discretized tensor, (*, D).
+        The quantized tensor, (*, D).
     """
 
     span = torch.where(upp > low, upp - low, bins)  # > 0.
@@ -111,23 +101,23 @@ def discretize(
 
 
 def histogramdd(
-    x: torch.Tensor,
-    bins: Union[int, List[int], torch.Tensor] = 10,
-    low: Union[float, List[float], torch.Tensor] = 0.,
-    upp: Union[float, List[float], torch.Tensor] = 0.,
+    x: Tensor,
+    bins: Vector = 10,
+    low: Vector = 0.,
+    upp: Vector = 0.,
     bounded: bool = False,
-    weights: torch.Tensor = None,
+    weights: Tensor = None,
     sparse: bool = False,
-) -> torch.Tensor:
+) -> Tensor:
     r"""Computes the multidimensional histogram of a tensor.
 
     This is a `torch` implementation of `numpy.histogramdd`.
 
     Args:
         x: A tensor, (*, D).
-        bins: The number of bins in each dimension.
-        low: The lower bound in each dimension.
-        upp: The upper bound in each dimension.
+        bins: The number of bins in each dimension, scalar or (D,).
+        low: The lower bound in each dimension, scalar or (D,).
+        upp: The upper bound in each dimension, scalar or (D,).
             If `upp` is equal to `low`, the min and max of `x` are used instead
             and `bounded` is ignored.
         bounded: Whether `x` is bounded by `low` and `upp`, included.
@@ -140,12 +130,11 @@ def histogramdd(
         The histogram, (*bins,).
     """
 
-    # Preprocess
     D = x.size(-1)
     x = x.view(-1, D)
 
-    bins = torch.as_tensor(bins)
-    shape = torch.Size(bins.int().expand(D))
+    bins = torch.as_tensor(bins).int()
+    shape = torch.Size(bins.expand(D))
     bins = bins.to(x)
 
     low, upp = torch.as_tensor(low), torch.as_tensor(upp)
@@ -168,8 +157,8 @@ def histogramdd(
         x = x[mask]
         weights = weights[mask]
 
-    # Discretize
-    idx = discretize(x, bins, low, upp).long()
+    # Quantization
+    idx = quantize(x, bins, low, upp).long()
 
     # Count
     if sparse:
@@ -182,20 +171,20 @@ def histogramdd(
 
 
 def histogramdd_edges(
-    x: torch.Tensor,
-    bins: Union[int, List[int], torch.Tensor] = 10,
-    low: Union[float, List[float], torch.Tensor] = 0.,
-    upp: Union[float, List[float], torch.Tensor] = 0.,
-) -> List[torch.Tensor]:
+    x: Tensor,
+    bins: Vector = 10,
+    low: Vector = 0.,
+    upp: Vector = 0.,
+) -> List[Tensor]:
     r"""Computes the edges of the uniform bins used by `histogramdd`.
 
     This is useful when plotting an histogram along with axes.
 
     Args:
         x: A tensor, (*, D).
-        bins: The number of bins in each dimension.
-        low: The lower bound in each dimension.
-        upp: The upper bound in each dimension.
+        bins: The number of bins in each dimension, scalar or (D,).
+        low: The lower bound in each dimension, scalar or (D,).
+        upp: The upper bound in each dimension, scalar or (D,).
             If `upp` is equal to `low`, the min and max of `x` are used instead.
 
     Returns:
@@ -205,7 +194,7 @@ def histogramdd_edges(
     D = x.size(-1)
     x = x.view(-1, D)
 
-    bins = torch.as_tensor(bins).expand(D)
+    bins = torch.as_tensor(bins).int().expand(D)
     low, upp = torch.as_tensor(low), torch.as_tensor(upp)
 
     if torch.all(low == upp):
@@ -220,12 +209,12 @@ def histogramdd_edges(
 
 
 def histogram(
-    x: torch.Tensor,
+    x: Tensor,
     bins: int = 10,
     low: float = 0.,
     upp: float = 0.,
     **kwargs,
-) -> torch.Tensor:
+) -> Tensor:
     r"""Computes the histogram of a tensor.
 
     This is a `torch` implementation of `numpy.histogram`.
@@ -248,11 +237,11 @@ def histogram(
 
 
 def histogram_edges(
-    x: torch.Tensor,
+    x: Tensor,
     bins: int = 10,
     low: float = 0.,
     upp: float = 0.,
-) -> torch.Tensor:
+) -> Tensor:
     r"""Computes the edges of the uniform bins used by `histogramdd`.
 
     This is a `torch` implementation of `numpy.histogram_bin_edges`.
@@ -272,12 +261,12 @@ def histogram_edges(
 
 
 def reduce_histogramdd(
-    seq: Iterable[torch.Tensor],
+    seq: Iterable[Tensor],
     *args,
-    device: torch.device = None,
-    hist: torch.Tensor = None,
+    device: Device = None,
+    hist: Tensor = None,
     **kwargs,
-) -> torch.Tensor:
+) -> Tensor:
     r"""Computes the multidimensional histogram of a sequence of tensors.
 
     This is useful for large datasets that don't fit on CUDA memory or
@@ -323,7 +312,7 @@ def reduce_histogramdd(
     return hist
 
 
-def normalize(hist: torch.Tensor) -> torch.Tensor:
+def normalize(hist: Tensor) -> Tensor:
     r"""Normalizes a histogram, that is, the sum of its elements is equal to one.
 
     Args:
@@ -341,16 +330,12 @@ def normalize(hist: torch.Tensor) -> torch.Tensor:
     return hist / norm
 
 
-def marginalize(
-    hist: torch.Tensor,
-    dim: Union[int, List[int]],
-    keep: bool = False,
-) -> torch.Tensor:
+def marginalize(hist: Tensor, dim: Union[int, Shape], keep: bool = False) -> Tensor:
     r"""Marginalizes (reduces by sum) a histogram over given dimensions.
 
     Args:
         hist: A dense or sparse histogram, (*,).
-        dim: The list of dimensions to marginalize over.
+        dim: The dimension or set of dimensions to marginalize over.
         keep: Whether the dimensions in `dim` are the ones that are kept
             or the ones that are reduced.
 
@@ -374,14 +359,14 @@ def marginalize(
 
 
 def sinkhorn_transport(
-    r: torch.Tensor,
-    c: torch.Tensor,
-    M: torch.Tensor,
+    r: Tensor,
+    c: Tensor,
+    M: Tensor,
     gamma: float = 100.,
     max_iter: int = 1000,
     threshold: float = 1e-8,
     step: int = 100,
-) -> torch.Tensor:
+) -> Tensor:
     r"""Computes the entropic regularized optimal transport between
     a source and a target distribution with respect to a cost matrix.
 
@@ -424,11 +409,7 @@ def sinkhorn_transport(
     return u.view(-1, 1) * K * v
 
 
-def rw_distance(
-    p: torch.Tensor,
-    q: torch.Tensor,
-    **kwargs,
-) -> torch.Tensor:
+def rw_distance(p: Tensor, q: Tensor, **kwargs) -> Tensor:
     r"""Computes the regularized Wasserstein distance between two distributions,
     assuming an Euclidean distance matrix.
 
@@ -460,10 +441,7 @@ def rw_distance(
     return (T * M).sum()
 
 
-def kl_divergence(
-    p: torch.Tensor,
-    q: torch.Tensor,
-) -> torch.Tensor:
+def kl_divergence(p: Tensor, q: Tensor) -> Tensor:
     r"""Computes the Kullback-Leibler divergence between two distributions.
 
     Args:
