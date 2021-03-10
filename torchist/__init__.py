@@ -485,7 +485,10 @@ if __name__ == '__main__':
     import timeit
 
     x = torch.rand(100000, 5)
-    x_np = x.numpy()
+    x0 = x[:, 0].clone()
+
+    print('CPU')
+    print('---')
 
     for key, f in {
         'np.histogram': np.histogram,
@@ -493,14 +496,38 @@ if __name__ == '__main__':
         'np.histogramdd': np.histogramdd,
         'torchist.histogramdd': histogramdd,
     }.items():
-        if 'torch' in key:
-            y = x
-        else:
-            y = x_np
+        y = x if 'dd' in key else x0
+        y = y if 'torch' in key else y.numpy()
 
-        if 'dd' not in key:
-            y = y[:, 0]
+        time = timeit.timeit(lambda: f(y), number=100)
 
-        g = lambda: f(y)
+        print(key, ':', '{:.04f}'.format(time), 's')
 
-        print(key, ':', timeit.timeit(g, number=100), 's')
+    if torch.cuda.is_available():
+        print()
+        print('CUDA')
+        print('----')
+
+        x, x0 = x.cuda(), x0.cuda()
+
+        for key, f in {
+            'torchist.histogram': histogram,
+            'torchist.histogramdd': histogramdd,
+        }.items():
+            y = x if 'dd' in key else x0
+
+            start = torch.cuda.Event(enable_timing=True)
+            end = torch.cuda.Event(enable_timing=True)
+
+            start.record()
+
+            for _ in range(100):
+                f(y)
+
+            end.record()
+
+            torch.cuda.synchronize()
+
+            time = start.elapsed_time(end) / 1000 # ms -> s
+
+            print(key, ':', '{:.04f}'.format(time), 's')

@@ -20,3 +20,22 @@ hist = torchist.histogramdd(x, bins=10, low=0., high=1.)
 
 print(hist.shape)  # (10, 10, 10)
 ```
+
+## Benchmark
+
+The implementations of `torchist` are up to 2 times faster than those of `numpy` on CPU and up to 16 times faster on CUDA, especially for `histogramdd`.
+
+```cmd
+$ python torchist/__init__.py
+CPU
+---
+np.histogram : 0.1204 s
+torchist.histogram : 0.0901 s
+np.histogramdd : 1.8788 s
+torchist.histogramdd : 0.8561 s
+
+CUDA
+----
+torchist.histogram : 0.0856 s
+torchist.histogramdd : 0.1170 s
+```
