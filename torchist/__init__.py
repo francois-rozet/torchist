@@ -1,6 +1,6 @@
 """NumPy-style histograms in PyTorch"""
 
-__version__ = '0.0.1'
+__version__ = '0.0.2'
 
 
 import torch
@@ -24,9 +24,9 @@ def ravel_multi_index(
         The raveled indices, (*,).
     """
 
-    index = torch.zeros_like(coords[..., 0])
+    index = coords[..., 0]
 
-    for i, dim in enumerate(shape):
+    for i, dim in enumerate(shape[1:], 1):
         index = dim * index + coords[..., i]
 
     return index
@@ -104,7 +104,7 @@ def discretize(
     span = torch.where(upp > low, upp - low, bins)  # > 0.
 
     x = (x - low) / span  # in [0., 1.]
-    x = torch.where(x < 1., x, 1. - .5 / bins)  # in [0., 1.)
+    x = torch.where(x < 1., x, 1. - 1. / bins)  # in [0., 1.)
     x = torch.floor(x * bins)  # in [0, bins)
 
     return x
@@ -112,11 +112,12 @@ def discretize(
 
 def histogramdd(
     x: torch.Tensor,
-    bins: Union[int, List[int]] = 10,
+    bins: Union[int, List[int], torch.Tensor] = 10,
     low: Union[float, torch.Tensor] = 0.,
     upp: Union[float, torch.Tensor] = 0.,
     bounded: bool = False,
     weights: torch.Tensor = None,
+    sparse: bool = False,
 ) -> torch.Tensor:
     r"""Computes the multidimensional histogram of a tensor.
 
@@ -133,6 +134,7 @@ def histogramdd(
             and the value of `bounded` is ignored.
         weights: A tensor of weights, (*,). Each sample of `x` contributes
             its associated weight towards the bin count (instead of 1).
+        sparse: Whether the histogram is returned as a sparse tensor or not.
 
     Returns:
         The histogram, (*bins,).
@@ -142,11 +144,11 @@ def histogramdd(
     D = x.size(-1)
     x = x.view(-1, D)
 
-    bins = torch.tensor(bins)
-    shape = torch.Size(bins.expand(D))
+    bins = torch.as_tensor(bins)
+    shape = torch.Size(bins.int().expand(D))
     bins = bins.to(x)
 
-    low, upp = torch.tensor(low), torch.tensor(upp)
+    low, upp = torch.as_tensor(low), torch.as_tensor(upp)
 
     if torch.all(low == upp):
         low, upp = x.min(dim=0)[0], x.max(dim=0)[0]
@@ -167,15 +169,14 @@ def histogramdd(
         weights = weights[mask]
 
     # Discretize
-    x = discretize(x, bins, low, upp)
+    idx = discretize(x, bins, low, upp).long()
 
     # Count
-    if D > 1:
-        x = ravel_multi_index(x, shape).long()
+    if sparse:
+        hist = torch.sparse_coo_tensor(idx.t(), weights, shape).coalesce()
     else:
-        x = x.view(-1).long()
-
-    hist = x.bincount(weights, minlength=shape.numel()).view(shape)
+        idx = ravel_multi_index(idx, shape)
+        hist = idx.bincount(weights, minlength=shape.numel()).view(shape)
 
     return hist
 
