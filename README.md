@@ -29,19 +29,19 @@ The implementations of `torchist` are up to 3 times faster than those of `numpy`
 $ python torchist/__init__.py
 CPU
 ---
-np.histogram : 1.2674 s
-np.histogramdd : 19.3845 s
-np.histogram (non-uniform) : 5.4961 s
-np.histogramdd (non-uniform) : 16.8242 s
-torchist.histogram : 0.8805 s
-torchist.histogramdd : 5.8721 s
-torchist.histogram (non-uniform) : 2.5283 s
-torchist.histogramdd (non-uniform) : 13.3900 s
+np.histogram : 1.3613 s
+np.histogramdd : 19.8844 s
+np.histogram (non-uniform) : 5.5652 s
+np.histogramdd (non-uniform) : 17.5668 s
+torchist.histogram : 0.9674 s
+torchist.histogramdd : 6.3047 s
+torchist.histogram (non-uniform) : 3.6520 s
+torchist.histogramdd (non-uniform) : 14.1086 s
 
 CUDA
 ----
-torchist.histogram : 0.1122 s
-torchist.histogramdd : 0.2757 s
-torchist.histogram (non-uniform) : 0.1253 s
-torchist.histogramdd (non-uniform) : 0.4441 s
+torchist.histogram : 0.1032 s
+torchist.histogramdd : 0.2668 s
+torchist.histogram (non-uniform) : 0.1230 s
+torchist.histogramdd (non-uniform) : 0.4407 s
 ```

@@ -523,26 +523,30 @@ if __name__ == '__main__':
     print('---')
 
     x = np.random.rand(1000000, 5)
-    x0 = x[:, 0].copy()
     edges = np.linspace(0., 1., 11)
 
+    x0 = x[:, 0].copy()
+    edges0 = np.linspace(0., 1., 101)
+
     for key, f in {
-        'np.histogram': lambda: np.histogram(x0, bins=10),
+        'np.histogram': lambda: np.histogram(x0, bins=100),
         'np.histogramdd': lambda: np.histogramdd(x, bins=10),
-        'np.histogram (non-uniform)': lambda: np.histogram(x0, bins=edges),
+        'np.histogram (non-uniform)': lambda: np.histogram(x0, bins=edges0),
         'np.histogramdd (non-uniform)': lambda: np.histogramdd(x, bins=[edges] * 5),
     }.items():
         time = timeit.timeit(f, number=100)
         print(key, ':', '{:.04f}'.format(time), 's')
 
     x = torch.tensor(x).float()
-    x0 = x[:, 0].clone()
     edges = torch.linspace(0., 1., 11)
 
+    x0 = x[:, 0].clone()
+    edges0 = torch.linspace(0., 1., 101)
+
     for key, f in {
-        'torchist.histogram': lambda: histogram(x0, bins=10),
+        'torchist.histogram': lambda: histogram(x0, bins=100),
         'torchist.histogramdd': lambda: histogramdd(x, bins=10),
-        'torchist.histogram (non-uniform)': lambda: histogram(x0, edges=edges),
+        'torchist.histogram (non-uniform)': lambda: histogram(x0, edges=edges0),
         'torchist.histogramdd (non-uniform)': lambda: histogramdd(x, edges=[edges] * 5),
     }.items():
         time = timeit.timeit(f, number=100)
@@ -553,12 +557,12 @@ if __name__ == '__main__':
         print('CUDA')
         print('----')
 
-        x, x0, edges = x.cuda(), x0.cuda(), edges.cuda()
+        x, edges, x0, edges0 = x.cuda(), edges.cuda(), x0.cuda(), edges0.cuda()
 
         for key, f in {
-            'torchist.histogram': lambda: histogram(x0, bins=10),
+            'torchist.histogram': lambda: histogram(x0, bins=100),
             'torchist.histogramdd': lambda: histogramdd(x, bins=10),
-            'torchist.histogram (non-uniform)': lambda: histogram(x0, edges=edges),
+            'torchist.histogram (non-uniform)': lambda: histogram(x0, edges=edges0),
             'torchist.histogramdd (non-uniform)': lambda: histogramdd(x, edges=[edges] * 5),
         }.items():
             start = torch.cuda.Event(enable_timing=True)
