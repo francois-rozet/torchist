@@ -4,8 +4,23 @@ The `torchist` package implements NumPy's [`histogram`](https://numpy.org/doc/st
 
 ## Installation
 
+The `torchist` package is available on [PyPI](https://pypi.org/project/torchist/), which means it is installable with `pip`:
+
+```bash
+pip install torchist
+```
+
+Alternatively, if you need the latest features, you can install it using
+
 ```bash
 pip install git+https://github.com/francois-rozet/torchist
+```
+
+or copy the package directly to your project, with
+
+```bash
+git clone https://github.com/francois-rozet/torchist
+cp -R torchist/torchist <path/to/project>/torchist
 ```
 
 ## Getting Started
