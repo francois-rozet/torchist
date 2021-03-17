@@ -1,6 +1,6 @@
 """NumPy-style histograms in PyTorch"""
 
-__version__ = '0.1.0'
+__version__ = '0.1.1'
 
 
 import torch
@@ -117,15 +117,15 @@ def pack_edges(edges: List[Tensor]) -> Tensor:
 
     maxlen = max(e.numel() for e in edges)
 
-    out = edges[0].new_full((len(edges), maxlen), float('inf'))
+    pack = edges[0].new_full((len(edges), maxlen), float('inf'))
     for i, e in enumerate(edges):
-        out[i, :e.numel()] = e.view(-1)
+        pack[i, :e.numel()] = e.view(-1)
 
-    return out
+    return pack
 
 
 def len_packed_edges(edges: Tensor) -> Tensor:
-    r"""Computes the length of each vector in a edges tensor.
+    r"""Computes the length of each vector in a packed edges tensor.
 
     Args:
         edges: A edges tensor, (D, max(bins) + 1).
@@ -331,8 +331,9 @@ def reduce_histogramdd(
 ) -> Tensor:
     r"""Computes the multidimensional histogram of a sequence of tensors.
 
-    This is useful for large datasets that don't fit on CUDA memory or
-    distributed datasets.
+    Each element of the sequence is processed on its own device before
+    being transferred to `device`. This is useful for distributed datasets
+    or large datasets that don't fit on CUDA memory at once.
 
     Args:
         seq: A sequence of tensors, each (*, D).
@@ -415,107 +416,7 @@ def marginalize(hist: Tensor, dim: Union[int, Shape], keep: bool = False) -> Ten
     return hist
 
 
-def sinkhorn_transport(
-    r: Tensor,
-    c: Tensor,
-    M: Tensor,
-    gamma: float = 100.,
-    max_iter: int = 1000,
-    threshold: float = 1e-8,
-    step: int = 100,
-) -> Tensor:
-    r"""Computes the entropic regularized optimal transport between
-    a source and a target distribution with respect to a cost matrix.
-
-    This function implements the Sinkhorn-Knopp algorithm from [1].
-
-    Args:
-        r: A source dense histogram, (N,).
-        c: A target dense histogram, (M,).
-        M: A cost matrix, (N, M).
-        gamma: The regularization term.
-        max_iter: The maximum number of iterations.
-        threshold: The stopping threshold on the error.
-        step: The number of iterations between two checks of the error.
-
-    Returns:
-        The transport, (N, M).
-
-    References:
-        [1] Sinkhorn Distances: Lightspeed Computation of Optimal Transportation Distances
-        (Cuturi, 2013)
-        https://arxiv.org/pdf/1306.0895.pdf
-    """
-
-    K = (-gamma * M).exp()
-    Kt = K.t().contiguous()
-
-    u = torch.full_like(r, 1. / len(r))
-
-    for i in range(max_iter):
-        v = c / (Kt @ u)
-        u = r / (K @ v)
-
-        if i % step == 0:
-            marginal = (Kt @ u) * v
-
-            err = torch.linalg.norm(marginal - c)
-            if err < threshold:
-                break
-
-    return u.view(-1, 1) * K * v
-
-
-def rw_distance(p: Tensor, q: Tensor, **kwargs) -> Tensor:
-    r"""Computes the regularized Wasserstein distance between two distributions,
-    assuming an Euclidean distance matrix.
-
-    Args:
-        p: A dense or sparse histogram, (*,).
-        q: A dense or sparse histogram, (*,).
-
-        `**kwargs` are passed on to `sinkhorn_transport`.
-
-    Returns:
-        The distance, (,).
-    """
-
-    # Sparsify
-    p = p.coalesce() if p.is_sparse else p.to_sparse()
-    q = q.coalesce() if q.is_sparse else q.to_sparse()
-
-    # Euclidean distance matrix
-    scale = 1. / torch.tensor(p.shape).to(p)
-
-    x_p = p.indices().t() * scale
-    x_q = q.indices().t() * scale
-
-    M = torch.cdist(x_p[None], x_q[None])[0]
-
-    # Regularized optimal transport
-    T = sinkhorn_transport(p.values(), q.values(), M, **kwargs)
-
-    return (T * M).sum()
-
-
-def kl_divergence(p: Tensor, q: Tensor) -> Tensor:
-    r"""Computes the Kullback-Leibler divergence between two distributions.
-
-    Args:
-        p: A dense histogram, (*,).
-        q: A dense histogram, (*,).
-
-    Returns:
-        The divergence, (,).
-    """
-
-    mask = p > 0.
-    p, q = p[mask], q[mask]
-
-    return (p * (p.log() - q.log())).sum()
-
-
-if __name__ == '__main__':
+if __name__ == '__main__':  # bad practice
     import numpy as np
     import timeit
 
