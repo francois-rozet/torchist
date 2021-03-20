@@ -22,12 +22,13 @@ def entropy(p: Tensor) -> Tensor:
     return -h.sum()
 
 
-def kl_divergence(p: Tensor, q: Tensor) -> Tensor:
+def kl_divergence(p: Tensor, q: Tensor, eps: float = 1e-32) -> Tensor:
     r"""Computes the Kullback-Leibler divergence between two distributions.
 
     Args:
         p: A dense histogram, (*,).
         q: A dense histogram, (*,).
+        eps: A threshold value.
 
     Returns:
         The divergence, (,).
@@ -35,7 +36,7 @@ def kl_divergence(p: Tensor, q: Tensor) -> Tensor:
 
     zero = p.new_tensor(0.)
 
-    kl = p * (p.log() - q.log())
+    kl = p * (p.log() - q.clip(min=eps).log())
     kl = torch.where(p > 0., kl, zero)
 
     return kl.sum()
