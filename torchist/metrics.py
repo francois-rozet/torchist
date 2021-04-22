@@ -8,11 +8,14 @@ def entropy(p: Tensor) -> Tensor:
     r"""Computes the entropy of a distribution.
 
     Args:
-        p: A dense histogram, (*,).
+        p: A dense or sparse histogram, (*,).
 
     Returns:
         The entropy, (,).
     """
+
+    if p.is_sparse:
+        p = p.coalesce().values()
 
     zero = p.new_tensor(0.)
 
@@ -22,22 +25,34 @@ def entropy(p: Tensor) -> Tensor:
     return -h.sum()
 
 
-def kl_divergence(p: Tensor, q: Tensor, eps: float = 1e-32) -> Tensor:
+def kl_divergence(p: Tensor, q: Tensor, eps: float = 1e-42) -> Tensor:
     r"""Computes the Kullback-Leibler divergence between two distributions.
 
     Args:
-        p: A dense histogram, (*,).
-        q: A dense histogram, (*,).
+        p: A dense or sparse histogram, (*,).
+        q: A dense or sparse histogram, (*,).
         eps: A threshold value.
 
     Returns:
         The divergence, (,).
     """
 
-    zero = p.new_tensor(0.)
+    if p.is_sparse:
+        p, q = p.coalesce(), q.coalesce()
 
-    kl = p * (p.log() - q.clip(min=eps).log())
-    kl = torch.where(p > 0., kl, zero)
+        log_p = torch.sparse_coo_tensor(p.indices(), p.values().log(), p.shape)
+
+        log_q = q + 0 * p
+        log_q._values().clip_(min=eps)
+        log_q._values().log_()
+
+        kl = p * (log_p - log_q)
+        kl = kl._values()
+    else:
+        zero = p.new_tensor(0.)
+
+        kl = p * (p.log() - q.clip(min=eps).log())
+        kl = torch.where(p > 0., kl, zero)
 
     return kl.sum()
 
@@ -98,8 +113,8 @@ def w_distance(p: Tensor, q: Tensor, **kwargs) -> Tensor:
     assuming a unit Euclidean distance matrix.
 
     Args:
-        p: A dense histogram, (*,).
-        q: A dense histogram, (*,).
+        p: A dense or sparse histogram, (*,).
+        q: A dense or sparse histogram, (*,).
 
         `**kwargs` are passed on to `sinkhorn_transport`.
 
@@ -107,14 +122,24 @@ def w_distance(p: Tensor, q: Tensor, **kwargs) -> Tensor:
         The distance, (,).
     """
 
-    # Positions
-    idx = torch.arange(p.numel(), device=p.device)
-    idx = unravel_index(idx, p.shape)
+    shape = p.new_tensor(p.shape)
 
-    x = idx.to(p) / p.new_tensor(p.shape)
+    # Positions
+    if p.is_sparse:
+        p, q = p.coalesce(), q.coalesce()
+        p, idx_p = p.values(), p.indices()
+        q, idx_q = p.values(), p.indices()
+
+        x_p, x_q = idx_p / shape, idx_q / shape
+    else:
+        idx = torch.arange(p.numel(), device=p.device)
+        idx = unravel_index(idx, p.shape)
+
+        x_p = idx.to(p) / shape
+        x_q = x_p
 
     # Euclidean distance matrix
-    M = torch.cdist(x[None], x[None])[0]
+    M = torch.cdist(x_p[None], x_q[None])[0]
 
     # Regularized optimal transport
     T = sinkhorn_transport(p.view(-1), q.view(-1), M, **kwargs)
