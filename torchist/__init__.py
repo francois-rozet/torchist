@@ -1,6 +1,6 @@
 """NumPy-style histograms in PyTorch"""
 
-__version__ = '0.1.3'
+__version__ = '0.1.6'
 
 
 import torch
@@ -163,6 +163,7 @@ def histogramdd(
         weights: A tensor of weights, (*,). Each sample of `x` contributes
             its associated weight towards the bin count (instead of 1).
         sparse: Whether the histogram is returned as a sparse tensor or not.
+            If `True`, `weights` is ignored.
         edges: The edges of the histogram. Either a vector, list of vectors or
             packed tensor of bin edges, (bins + 1,) or (D, max(bins) + 1).
             If provided, `bins`, `low` and `upp` are inferred from `edges`.
@@ -198,10 +199,7 @@ def histogramdd(
             bins = torch.tensor(len(edges) - 1)
             low, upp = edges[0], edges[-1]
 
-    # Weights
-    if weights is None:
-        weights = x.new_ones(x.size(0))
-    else:
+    if weights is not None:
         weights = weights.view(-1)
 
     # Filter out-of-bound values
@@ -209,7 +207,9 @@ def histogramdd(
         mask = ~out_of_bounds(x, low, upp)
 
         x = x[mask]
-        weights = weights[mask]
+
+        if weights is not None:
+            weights = weights[mask]
 
     # Indexing
     if edges is None:
@@ -224,7 +224,9 @@ def histogramdd(
     shape = torch.Size(bins.expand(D))
 
     if sparse:
-        hist = torch.sparse_coo_tensor(idx.t(), weights, shape).coalesce()
+        idx, counts = torch.unique(idx, dim=0, return_counts=True)
+        hist = torch.sparse_coo_tensor(idx.t(), counts, shape)
+        hist._coalesced_(True)
     else:
         if D > 1:
             idx = ravel_multi_index(idx, shape)
@@ -357,20 +359,14 @@ def reduce_histogramdd(
         temp = histogramdd(x, *args, **kwargs)
 
         if hist is None:
-            hist = temp
-
-            if device is not None:
-                hist = hist.to(device)
+            hist = temp.to(device)
         else:
             hist = hist + temp.to(hist)
-
-    if hist.is_sparse:
-        hist = hist.coalesce()
 
     return hist
 
 
-def normalize(hist: Tensor) -> Tensor:
+def normalize(hist: Tensor) -> Tuple[Tensor, Tensor]:
     r"""Normalizes a histogram, that is, the sum of its elements is equal to one.
 
     Args:
@@ -385,7 +381,7 @@ def normalize(hist: Tensor) -> Tensor:
     else:
         norm = hist.sum()
 
-    return hist / norm
+    return hist / norm, norm
 
 
 def marginalize(hist: Tensor, dim: Union[int, Shape], keep: bool = False) -> Tensor:
