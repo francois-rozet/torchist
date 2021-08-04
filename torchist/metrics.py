@@ -57,6 +57,27 @@ def kl_divergence(p: Tensor, q: Tensor, eps: float = 1e-42) -> Tensor:
     return kl.sum()
 
 
+def js_divergence(p: Tensor, q: Tensor, gamma: float = 0.5, **kwargs) -> Tensor:
+    r"""Computes the Jensen-Shannon divergence between two distributions.
+
+    Args:
+        p: A dense or sparse histogram, (*,).
+        q: A dense or sparse histogram, (*,).
+        gamma: The mixing rate.
+
+        `**kwargs` are passed on to `kl_divergence`.
+
+    Returns:
+        The divergence, (,).
+    """
+
+    m = gamma * p + (1 - gamma) * q
+    left = kl_divergence(p, m, **kwargs)
+    right = kl_divergence(q, m, **kwargs)
+
+    return gamma * left + (1 - gamma) * right
+
+
 def sinkhorn_transport(
     r: Tensor,
     c: Tensor,
@@ -72,16 +93,16 @@ def sinkhorn_transport(
     This function implements the Sinkhorn-Knopp algorithm from [1].
 
     Args:
-        r: A source dense histogram, (N,).
-        c: A target dense histogram, (M,).
-        M: A cost matrix, (N, M).
+        r: A source dense histogram, (A,).
+        c: A target dense histogram, (B,).
+        M: A cost matrix, (A, B).
         gamma: The regularization term.
         max_iter: The maximum number of iterations.
         threshold: The stopping threshold on the error.
         step: The number of iterations between two checks of the error.
 
     Returns:
-        The transport, (N, M).
+        The transport, (A, B).
 
     References:
         [1] Sinkhorn Distances: Lightspeed Computation of Optimal Transportation Distances
@@ -108,8 +129,8 @@ def sinkhorn_transport(
     return u.view(-1, 1) * K * v
 
 
-def w_distance(p: Tensor, q: Tensor, **kwargs) -> Tensor:
-    r"""Computes the regularized Wasserstein distance between two distributions,
+def em_distance(p: Tensor, q: Tensor, **kwargs) -> Tensor:
+    r"""Computes the regularized earth mover's distance between two distributions,
     assuming a unit Euclidean distance matrix.
 
     Args:
