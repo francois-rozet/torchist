@@ -1,6 +1,6 @@
 """NumPy-style histograms in PyTorch"""
 
-__version__ = '0.1.7'
+__version__ = '0.1.8'
 
 
 import torch
@@ -28,13 +28,10 @@ def ravel_multi_index(coords: Tensor, shape: Shape) -> Tensor:
         The raveled indices, (*,).
     """
 
-    coef = coords.new_tensor(shape[1:] + (1,))
-    coef = coef.flipud().cumprod(0).flipud()
+    shape = coords.new_tensor(shape + (1,))
+    coefs = shape[1:].flipud().cumprod(dim=0).flipud()
 
-    if coords.is_cuda and not coords.is_floating_point():
-        return (coords * coef).sum(dim=-1)
-    else:
-        return coords @ coef
+    return (coords * coefs).sum(dim=-1)
 
 
 def unravel_index(indices: Tensor, shape: Shape) -> Tensor:
@@ -50,15 +47,10 @@ def unravel_index(indices: Tensor, shape: Shape) -> Tensor:
         The unraveled coordinates, (*, D).
     """
 
-    coords = []
+    shape = indices.new_tensor(shape + (1,))
+    coefs = shape[1:].flipud().cumprod(dim=0).flipud()
 
-    for dim in reversed(shape):
-        coords.append(indices % dim)
-        indices = indices // dim
-
-    coords = torch.stack(coords[::-1], dim=-1)
-
-    return coords
+    return torch.div(indices[..., None], coefs, rounding_mode='trunc') % shape[:-1]
 
 
 def out_of_bounds(x: Tensor, low: Tensor, upp: Tensor) -> Tensor:
