@@ -1,21 +1,14 @@
-"""NumPy-style histograms in PyTorch"""
+r"""NumPy-style histograms in PyTorch"""
 
-__version__ = '0.1.8'
-
+__version__ = '0.2.0'
 
 import torch
 
-from typing import Iterable, List, Tuple, Union
+from torch import Size, Tensor, BoolTensor
+from typing import *
 
 
-Scalar = Union[int, float]
-Tensor = torch.Tensor
-Vector = Union[Scalar, List[Scalar], Tuple[Scalar, ...], Tensor]  # anything working with `torch.as_tensor`
-Shape = Union[List[int], Tuple[int, ...], torch.Size]
-Device = torch.device
-
-
-def ravel_multi_index(coords: Tensor, shape: Shape) -> Tensor:
+def ravel_multi_index(coords: Tensor, shape: Size) -> Tensor:
     r"""Converts a tensor of coordinate vectors into a tensor of flat indices.
 
     This is a `torch` implementation of `numpy.ravel_multi_index`.
@@ -34,7 +27,7 @@ def ravel_multi_index(coords: Tensor, shape: Shape) -> Tensor:
     return (coords * coefs).sum(dim=-1)
 
 
-def unravel_index(indices: Tensor, shape: Shape) -> Tensor:
+def unravel_index(indices: Tensor, shape: Size) -> Tensor:
     r"""Converts a tensor of flat indices into a tensor of coordinate vectors.
 
     This is a `torch` implementation of `numpy.unravel_index`.
@@ -53,7 +46,7 @@ def unravel_index(indices: Tensor, shape: Shape) -> Tensor:
     return torch.div(indices[..., None], coefs, rounding_mode='trunc') % shape[:-1]
 
 
-def out_of_bounds(x: Tensor, low: Tensor, upp: Tensor) -> Tensor:
+def out_of_bounds(x: Tensor, low: Tensor, upp: Tensor) -> BoolTensor:
     r"""Returns a mask of out-of-bounds values in `x`.
 
     Args:
@@ -86,58 +79,22 @@ def quantize(x: Tensor, bins: Tensor, low: Tensor, upp: Tensor) -> Tensor:
         The quantized tensor, (*, D).
     """
 
-    span = torch.where(upp > low, upp - low, bins)  # > 0.
-
-    x = (x - low) * (bins / span)  # in [0., bins]
-    x = torch.where(x < bins, x, bins - 1.)  # in [0., bins)
-    x = x.long()  # in [0, bins)
+    x = (x - low) / (upp - low)  # in [0.0, 1.0]
+    x = (bins * x).long()  # in [0, bins]
+    x = torch.clip(x, min=0, max=bins - 1)  # in [0, bins)
 
     return x
 
 
-def pack_edges(edges: List[Tensor]) -> Tensor:
-    r"""Packs a list of edges vector as a single tensor.
-
-    Shorther vectors are padded with the `inf` value.
-
-    Args:
-        edges: A list of D edges vectors, each (bins + 1,).
-
-    Returns:
-        The edges tensor, (D, max(bins) + 1).
-    """
-
-    maxlen = max(e.numel() for e in edges)
-
-    pack = edges[0].new_full((len(edges), maxlen), float('inf'))
-    for i, e in enumerate(edges):
-        pack[i, :e.numel()] = e.view(-1)
-
-    return pack
-
-
-def len_packed_edges(edges: Tensor) -> Tensor:
-    r"""Computes the length of each vector in a packed edges tensor.
-
-    Args:
-        edges: A edges tensor, (D, max(bins) + 1).
-
-    Returns:
-        The lengths, (D,).
-    """
-
-    return torch.count_nonzero(edges.isfinite(), dim=-1)
-
-
 def histogramdd(
     x: Tensor,
-    bins: Vector = 10,
-    low: Vector = 0.,
-    upp: Vector = 0.,
+    bins: Union[int, Sequence[int]] = 10,
+    low: Union[float, Sequence[float]] = None,
+    upp: Union[float, Sequence[float]] = None,
     bounded: bool = False,
     weights: Tensor = None,
     sparse: bool = False,
-    edges: Union[Tensor, List[Tensor]] = None,
+    edges: Union[Tensor, Sequence[Tensor]] = None,
 ) -> Tensor:
     r"""Computes the multidimensional histogram of a tensor.
 
@@ -146,18 +103,16 @@ def histogramdd(
     Args:
         x: A tensor, (*, D).
         bins: The number of bins in each dimension, scalar or (D,).
-        low: The lower bound in each dimension, scalar or (D,).
-        upp: The upper bound in each dimension, scalar or (D,).
-            If `upp` is equal to `low`, the min and max of `x` are used instead
-            and `bounded` is ignored.
+        low: The lower bound in each dimension, scalar or (D,). If `low` is `None`,
+            the min of `x` is used instead.
+        upp: The upper bound in each dimension, scalar or (D,). If `upp` is `None`,
+            the max of `x` is used instead.
         bounded: Whether `x` is bounded by `low` and `upp`, included.
             If `False`, out-of-bounds values are filtered out.
         weights: A tensor of weights, (*,). Each sample of `x` contributes
             its associated weight towards the bin count (instead of 1).
         sparse: Whether the histogram is returned as a sparse tensor or not.
-            If `True`, `weights` is ignored.
-        edges: The edges of the histogram. Either a vector, list of vectors or
-            packed tensor of bin edges, (bins + 1,) or (D, max(bins) + 1).
+        edges: The edges of the histogram. Either a vector or a list of vectors.
             If provided, `bins`, `low` and `upp` are inferred from `edges`.
 
     Returns:
@@ -166,33 +121,42 @@ def histogramdd(
 
     # Preprocess
     D = x.size(-1)
-    x = x.view(-1, D).squeeze(-1)
+    x = x.reshape(-1, D).squeeze(-1)
 
     if edges is None:
-        bins = torch.as_tensor(bins).squeeze().long()
-        low = torch.as_tensor(low).squeeze()
-        upp = torch.as_tensor(upp).squeeze()
+        bounded = bounded or (low is None and upp is None)
 
-        if torch.all(low == upp):
-            low, upp = x.min(dim=0)[0], x.max(dim=0)[0]
-            bounded = True
-        else:
-            low, upp = low.to(x), upp.to(x)
-    else:  # non-uniform binning
-        if type(edges) is list:
-            edges = pack_edges(edges)
+        if low is None:
+            low = x.min(dim=0)[0]
 
-        edges = edges.squeeze(0).to(x)
+        if upp is None:
+            upp = x.max(dim=0)[0]
+    elif torch.is_tensor(edges):
+        edges = edges.flatten().to(x)
+        bins = edges.numel() - 1
+        low = edges[0]
+        upp = edges[-1]
+    else:
+        edges = [e.flatten() for e in edges]
+        bins = [e.numel() - 1 for e in edges]
+        low = [e[0] for e in edges]
+        upp = [e[-1] for e in edges]
 
-        if edges.dim() > 1:  # (D, max(bins) + 1)
-            bins = len_packed_edges(edges) - 1
-            low, upp = edges[:, 0], edges[torch.arange(D), bins]
-        else:  # (bins + 1,)
-            bins = torch.tensor(len(edges) - 1)
-            low, upp = edges[0], edges[-1]
+        pack = x.new_full((D, max(bins) + 1), float('inf'))
+
+        for i, e in enumerate(edges):
+            pack[i, :e.numel()] = e.to(x)  # pad with inf
+
+        edges = pack
+
+    assert torch.all(upp > low), "The upper bound must be strictly larger than the lower bound"
+
+    bins = torch.as_tensor(bins).squeeze().long()
+    low = torch.as_tensor(low).squeeze().to(x)
+    upp = torch.as_tensor(upp).squeeze().to(x)
 
     if weights is not None:
-        weights = weights.view(-1)
+        weights = weights.flatten()
 
     # Filter out-of-bound values
     if not bounded:
@@ -205,33 +169,38 @@ def histogramdd(
 
     # Indexing
     if edges is None:
-        idx = quantize(x, bins.to(x), low, upp)
-    else:  # non-uniform binning
-        if edges.dim() > 1:
-            idx = torch.searchsorted(edges, x.t().contiguous(), right=True).t() - 1
-        else:
-            idx = torch.bucketize(x, edges, right=True) - 1
+        idx = quantize(x, bins.to(x.device), low, upp)
+    elif edges.dim() > 1:
+        idx = torch.searchsorted(edges, x.t().contiguous(), right=True).t() - 1
+    else:
+        idx = torch.bucketize(x, edges, right=True) - 1
 
     # Histogram
     shape = torch.Size(bins.expand(D))
 
     if sparse:
-        idx, counts = torch.unique(idx, dim=0, return_counts=True)
-        hist = torch.sparse_coo_tensor(idx.t(), counts, shape)
+        if weights is None:
+            idx, values = torch.unique(idx, dim=0, return_counts=True)
+        else:
+            idx, inverse = torch.unique(idx, dim=0, return_inverse=True)
+            values = weights.new_zeros(len(idx))
+            values = values.scatter_add(dim=0, index=inverse, src=weights)
+
+        hist = torch.sparse_coo_tensor(idx.t(), values, shape)
         hist._coalesced_(True)
     else:
         if D > 1:
             idx = ravel_multi_index(idx, shape)
-        hist = idx.bincount(weights, minlength=shape.numel()).view(shape)
+        hist = idx.bincount(weights, minlength=shape.numel()).reshape(shape)
 
     return hist
 
 
 def histogramdd_edges(
     x: Tensor,
-    bins: Vector = 10,
-    low: Vector = 0.,
-    upp: Vector = 0.,
+    bins: Union[int, Sequence[int]] = 10,
+    low: Union[float, Sequence[float]] = None,
+    upp: Union[float, Sequence[float]] = None,
 ) -> List[Tensor]:
     r"""Computes the edges of the uniform bins used by `histogramdd`.
 
@@ -240,24 +209,29 @@ def histogramdd_edges(
     Args:
         x: A tensor, (*, D).
         bins: The number of bins in each dimension, scalar or (D,).
-        low: The lower bound in each dimension, scalar or (D,).
-        upp: The upper bound in each dimension, scalar or (D,).
-            If `upp` is equal to `low`, the min and max of `x` are used instead.
+        low: The lower bound in each dimension, scalar or (D,). If `low` is `None`,
+            the min of `x` is used instead.
+        upp: The upper bound in each dimension, scalar or (D,). If `upp` is `None`,
+            the max of `x` is used instead.
 
     Returns:
         The list of D bin edges, each (bins + 1,).
     """
 
     D = x.size(-1)
-    x = x.view(-1, D)
+    x = x.reshape(-1, D)
 
-    bins = torch.as_tensor(bins).int().expand(D)
-    low, upp = torch.as_tensor(low), torch.as_tensor(upp)
+    bins = torch.as_tensor(bins).long().expand(D)
 
-    if torch.all(low == upp):
-        low, upp = x.min(dim=0)[0], x.max(dim=0)[0]
+    if low is None:
+        low = x.min(dim=0)[0]
     else:
-        low, upp = low.expand(D), upp.expand(D)
+        low = torch.as_tensor(low).squeeze().expand(D)
+
+    if upp is None:
+        upp = x.max(dim=0)[0]
+    else:
+        upp = torch.as_tensor(upp).squeeze().expand(D)
 
     return [
         torch.linspace(l, u, b + 1)
@@ -268,8 +242,8 @@ def histogramdd_edges(
 def histogram(
     x: Tensor,
     bins: int = 10,
-    low: float = 0.,
-    upp: float = 0.,
+    low: float = None,
+    upp: float = None,
     **kwargs,
 ) -> Tensor:
     r"""Computes the histogram of a tensor.
@@ -279,25 +253,22 @@ def histogram(
     Args:
         x: A tensor, (*,).
         bins: The number of bins.
-        low: The lower bound.
-        upp: The upper bound.
-            If `upp` is equal to `low`, the min and max of `x` are used instead
-            and `bounded` is ignored.
-
-        `**kwargs` are passed on to `histogramdd`.
+        low: The lower bound. If `low` is `None` the min of `x` is used instead.
+        upp: The upper bound. If `upp` is `None` the max of `x` is used instead.
+        kwargs: Keyword arguments passed to `histogramdd`.
 
     Returns:
         The histogram, (bins,).
     """
 
-    return histogramdd(x.view(-1, 1), bins, low, upp, **kwargs)
+    return histogramdd(x.unsqueeze(-1), bins, low, upp, **kwargs)
 
 
 def histogram_edges(
     x: Tensor,
     bins: int = 10,
-    low: float = 0.,
-    upp: float = 0.,
+    low: float = None,
+    upp: float = None,
 ) -> Tensor:
     r"""Computes the edges of the uniform bins used by `histogramdd`.
 
@@ -306,21 +277,20 @@ def histogram_edges(
     Args:
         x: A tensor, (*,).
         bins: The number of bins.
-        low: The lower bound.
-        upp: The upper bound.
-            If `upp` is equal to `low`, the min and max of `x` are used instead.
+        low: The lower bound. If `low` is `None` the min of `x` is used instead.
+        upp: The upper bound. If `upp` is `None` the max of `x` is used instead.
 
     Returns:
         The bin edges, (bins + 1,).
     """
 
-    return histogramdd_bin_edges(x.view(-1, 1), bins, low, upp)[0]
+    return histogramdd_edges(x.unsqueeze(-1), bins, low, upp)[0]
 
 
 def reduce_histogramdd(
     seq: Iterable[Tensor],
     *args,
-    device: Device = None,
+    device: torch.device = None,
     **kwargs,
 ) -> Tensor:
     r"""Computes the multidimensional histogram of a sequence of tensors.
@@ -331,10 +301,10 @@ def reduce_histogramdd(
 
     Args:
         seq: A sequence of tensors, each (*, D).
+        args: Positional arguments passed to `histogramdd`.
         device: The device of the output histogram. If `None`,
             use the device of the first element of `seq`.
-
-        `*args` and `**kwargs` are passed on to `histogramdd`.
+        kwargs: Keyword arguments passed to `histogramdd`.
 
     Returns:
         The histogram, (*bins,).
@@ -376,7 +346,11 @@ def normalize(hist: Tensor) -> Tuple[Tensor, Tensor]:
     return hist / norm, norm
 
 
-def marginalize(hist: Tensor, dim: Union[int, Shape], keep: bool = False) -> Tensor:
+def marginalize(
+    hist: Tensor,
+    dim: Union[int, Sequence[int]],
+    keep: bool = False,
+) -> Tensor:
     r"""Marginalizes (reduces by sum) a histogram over given dimensions.
 
     Args:
@@ -413,8 +387,8 @@ if __name__ == '__main__':  # bad practice
 
     x = np.random.rand(1000000)
     xdd = np.random.rand(1000000, 5)
-    edges10 = np.linspace(0., 1., 11)
-    edges100 = np.linspace(0., 1., 101)
+    edges10 = np.linspace(0.0, 1.0, 11) ** 1.5
+    edges100 = np.linspace(0.0, 1.0, 101) ** 1.5
 
     x_t = torch.from_numpy(x)
     xdd_t = torch.from_numpy(xdd)

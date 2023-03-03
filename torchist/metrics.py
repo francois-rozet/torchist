@@ -1,5 +1,4 @@
-"""Miscellaneous metrics over distributions"""
-
+r"""Miscellaneous metrics over distributions"""
 
 from . import *
 
@@ -82,7 +81,7 @@ def sinkhorn_transport(
     r: Tensor,
     c: Tensor,
     M: Tensor,
-    gamma: float = 100.,
+    gamma: float = 100.0,
     max_iter: int = 1000,
     threshold: float = 1e-8,
     step: int = 100,

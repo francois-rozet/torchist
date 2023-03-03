@@ -4,23 +4,16 @@ The `torchist` package implements NumPy's [`histogram`](https://numpy.org/doc/st
 
 ## Installation
 
-The `torchist` package is available on [PyPI](https://pypi.org/project/torchist/), which means it is installable with `pip`:
+The `torchist` package is available on [PyPI](https://pypi.org/project/torchist), which means it is installable with `pip`.
 
-```bash
+```
 pip install torchist
 ```
 
-Alternatively, if you need the latest features, you can install it using
+Alternatively, if you need the latest features, you can install it from the repository.
 
-```bash
-pip install git+https://github.com/francois-rozet/torchist
 ```
-
-or copy the package directly to your project, with
-
-```bash
-git clone https://github.com/francois-rozet/torchist
-cp -R torchist/torchist <path/to/project>/torchist
+pip install git+https://github.com/francois-rozet/torchist
 ```
 
 ## Getting Started
@@ -31,7 +24,7 @@ import torchist
 
 x = torch.rand(100, 3).cuda()
 
-hist = torchist.histogramdd(x, bins=10, low=0., upp=1.)
+hist = torchist.histogramdd(x, bins=10, low=0.0, upp=1.0)
 
 print(hist.shape)  # (10, 10, 10)
 ```
@@ -40,7 +33,7 @@ print(hist.shape)  # (10, 10, 10)
 
 The implementations of `torchist` are on par or faster than those of `numpy` on CPU and benefit greately from CUDA capabilities.
 
-```cmd
+```console
 $ python torchist/__init__.py
 CPU
 ---
