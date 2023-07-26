@@ -81,7 +81,7 @@ def quantize(x: Tensor, bins: Tensor, low: Tensor, upp: Tensor) -> Tensor:
 
     x = (x - low) / (upp - low)  # in [0.0, 1.0]
     x = (bins * x).long()  # in [0, bins]
-    x = torch.clip(x, min=0, max=bins - 1)  # in [0, bins)
+    x = torch.clip(x, min=None, max=bins - 1)  # in [0, bins)
 
     return x
 
@@ -149,11 +149,11 @@ def histogramdd(
 
         edges = pack
 
-    assert torch.all(upp > low), "The upper bound must be strictly larger than the lower bound"
-
     bins = torch.as_tensor(bins).squeeze().long()
     low = torch.as_tensor(low).squeeze().to(x)
     upp = torch.as_tensor(upp).squeeze().to(x)
+
+    assert torch.all(upp > low), "The upper bound must be strictly larger than the lower bound"
 
     if weights is not None:
         weights = weights.flatten()
