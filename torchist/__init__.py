@@ -67,7 +67,7 @@ def out_of_bounds(x: Tensor, low: Tensor, upp: Tensor) -> BoolTensor:
 
 
 def quantize(x: Tensor, bins: Tensor, low: Tensor, upp: Tensor) -> Tensor:
-    r"""Maps the values of `x` to integers in [0, bins).
+    r"""Maps the values of `x` to integers.
 
     Args:
         x: A tensor, (*, D).
@@ -81,7 +81,6 @@ def quantize(x: Tensor, bins: Tensor, low: Tensor, upp: Tensor) -> Tensor:
 
     x = (x - low) / (upp - low)  # in [0.0, 1.0]
     x = (bins * x).long()  # in [0, bins]
-    x = torch.clip(x, min=None, max=bins - 1)  # in [0, bins)
 
     return x
 
@@ -99,6 +98,10 @@ def histogramdd(
     r"""Computes the multidimensional histogram of a tensor.
 
     This is a `torch` implementation of `numpy.histogramdd`.
+
+    Note:
+        Similar to `numpy.histogram`, all bins are half-open except the last bin which
+        also includes the upper bound.
 
     Args:
         x: A tensor, (*, D).
@@ -127,10 +130,10 @@ def histogramdd(
         bounded = bounded or (low is None and upp is None)
 
         if low is None:
-            low = x.min(dim=0)[0]
+            low = x.min(dim=0).values
 
         if upp is None:
-            upp = x.max(dim=0)[0]
+            upp = x.max(dim=0).values
     elif torch.is_tensor(edges):
         edges = edges.flatten().to(x)
         bins = edges.numel() - 1
@@ -149,9 +152,9 @@ def histogramdd(
 
         edges = pack
 
-    bins = torch.as_tensor(bins).squeeze().long()
-    low = torch.as_tensor(low).squeeze().to(x)
-    upp = torch.as_tensor(upp).squeeze().to(x)
+    bins = torch.as_tensor(bins, dtype=torch.long, device=x.device).squeeze()
+    low = torch.as_tensor(low, dtype=x.dtype, device=x.device).squeeze()
+    upp = torch.as_tensor(upp, dtype=x.dtype, device=x.device).squeeze()
 
     assert torch.all(upp > low), "The upper bound must be strictly larger than the lower bound"
 
@@ -169,14 +172,16 @@ def histogramdd(
 
     # Indexing
     if edges is None:
-        idx = quantize(x, bins.to(x.device), low, upp)
+        idx = quantize(x, bins, low, upp)
     elif edges.dim() > 1:
         idx = torch.searchsorted(edges, x.t().contiguous(), right=True).t() - 1
     else:
         idx = torch.bucketize(x, edges, right=True) - 1
 
+    idx = torch.clip(idx, min=None, max=bins - 1)  # last bin includes upper bound
+
     # Histogram
-    shape = torch.Size(bins.expand(D))
+    shape = torch.Size(bins.expand(D).tolist())
 
     if sparse:
         if weights is None:
