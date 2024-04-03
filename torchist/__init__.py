@@ -1,6 +1,6 @@
 r"""NumPy-style histograms in PyTorch"""
 
-__version__ = '0.2.2'
+__version__ = '0.2.3'
 
 import torch
 
