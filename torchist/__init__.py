@@ -124,7 +124,7 @@ def histogramdd(
 
     # Preprocess
     D = x.size(-1)
-    x = x.reshape(-1, D).squeeze(-1)
+    x = x.reshape(-1, D)
 
     if edges is None:
         bounded = bounded or (low is None and upp is None)
@@ -194,8 +194,7 @@ def histogramdd(
         hist = torch.sparse_coo_tensor(idx.t(), values, shape)
         hist._coalesced_(True)
     else:
-        if D > 1:
-            idx = ravel_multi_index(idx, shape)
+        idx = ravel_multi_index(idx, shape)
         hist = idx.bincount(weights, minlength=shape.numel()).reshape(shape)
 
     return hist
