@@ -400,6 +400,18 @@ if __name__ == '__main__':  # bad practice
     edges10_t = torch.from_numpy(edges10)
     edges100_t = torch.from_numpy(edges100)
 
+    ## Correctness
+    hdd, _ = np.histogramdd(xdd, bins=10)
+    hdd_t = histogramdd(xdd_t, bins=10)
+
+    assert np.all(hdd == hdd_t.numpy())
+
+    hdd, _ = np.histogramdd(xdd, bins=[edges10] * 5)
+    hdd_t = histogramdd(xdd_t, edges=[edges10_t] * 5)
+
+    assert np.all(hdd == hdd_t.numpy())
+
+    ## Speed
     for key, f in {
         'np.histogram': lambda: np.histogram(x, bins=100),
         'np.histogramdd': lambda: np.histogramdd(xdd, bins=10),
@@ -425,6 +437,18 @@ if __name__ == '__main__':  # bad practice
     edges10_t = edges10_t.cuda()
     edges100_t = edges100_t.cuda()
 
+    ## Correctness
+    hdd, _ = np.histogramdd(xdd, bins=10)
+    hdd_t = histogramdd(xdd_t, bins=10)
+
+    assert np.all(hdd == hdd_t.cpu().numpy())
+
+    hdd, _ = np.histogramdd(xdd, bins=[edges10] * 5)
+    hdd_t = histogramdd(xdd_t, edges=[edges10_t] * 5)
+
+    assert np.all(hdd == hdd_t.cpu().numpy())
+
+    ## Speed
     for key, f in {
         'torchist.histogram': lambda: histogram(x_t, bins=100),
         'torchist.histogramdd': lambda: histogramdd(xdd_t, bins=10),
