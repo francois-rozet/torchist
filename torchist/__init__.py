@@ -1,6 +1,6 @@
 r"""NumPy-style histograms in PyTorch"""
 
-__version__ = "0.2.3"
+__version__ = "1.0.0"
 
 from .histograms import (  # noqa: F401
     histogram,
