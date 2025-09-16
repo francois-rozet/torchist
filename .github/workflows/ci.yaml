@@ -1,0 +1,29 @@
+name: Continuous integration
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - {python: "3.9", torch: "1.13"}
+          - {python: "3.10", torch: "2.0"}
+          - {python: "3.11", torch: "2.2"}
+          - {python: "3.12", torch: "2.4"}
+          - {python: "3.13", torch: "2.6"}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.version.python }}
+      - name: Install dependencies
+        run: |
+          pip install numpy==1.* torch==${{ matrix.version.torch }} --extra-index-url https://download.pytorch.org/whl/cpu
+          pip install .[test]
+      - name: Run tests
+        run: pytest tests
