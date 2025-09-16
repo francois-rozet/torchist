@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "torchist"
+description = "NumPy-style histograms in PyTorch"
+authors = [
+  {name = "François Rozet", email = "francois.rozet@outlook.com"}
+]
+classifiers = [
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Natural Language :: English",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+]
+dependencies = [
+  "torch>=1.6.0",
+]
+dynamic = ["version"]
+keywords = ["torch", "histogram"]
+license = "MIT"
+readme = "README.md"
+requires-python = ">=3.8"
+
+[project.optional-dependencies]
+lint = [
+  "ruff==0.9.9",
+]
+test = [
+  "numpy>=1.20.0",
+  "pytest>=8.0.0",
+]
+
+[project.scripts]
+torchist-benchmark = "torchist.histograms:benchmark"
+
+[project.urls]
+source = "https://github.com/francois-rozet/torchist"
+tracker = "https://github.com/francois-rozet/torchist/issues"
+
+[tool.ruff]
+extend-include = ["*.ipynb"]
+line-length = 99
+
+[tool.ruff.lint]
+extend-select = ["B", "I", "W"]
+ignore = ["E741"]
+preview = true
+
+[tool.ruff.lint.isort]
+lines-between-types = 1
+relative-imports-order = "closest-to-furthest"
+section-order = ["future", "third-party", "first-party", "local-folder"]
+
+[tool.ruff.format]
+preview = true
+
+[tool.setuptools.dynamic]
+version = {attr = "torchist.__version__"}
+
+[tool.setuptools.packages.find]
+include = ["torchist*"]

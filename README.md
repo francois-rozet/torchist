@@ -31,25 +31,29 @@ print(hist.shape)  # (10, 10, 10)
 
 ## Benchmark
 
-The implementations of `torchist` are on par or faster than those of `numpy` on CPU and benefit greately from CUDA capabilities.
+The implementations of `torchist` are on par or faster than those of `numpy` and `torch` on CPU. On GPU (CUDA), they are much faster.
 
 ```console
-$ python torchist/__init__.py
+$ torchist-benchmark
 CPU
 ---
-np.histogram : 1.2559 s
-np.histogramdd : 20.7816 s
-np.histogram (non-uniform) : 5.4878 s
-np.histogramdd (non-uniform) : 17.3757 s
-torchist.histogram : 1.3975 s
-torchist.histogramdd : 9.6160 s
-torchist.histogram (non-uniform) : 5.0883 s
-torchist.histogramdd (non-uniform) : 17.2743 s
+np.histogram                      0.8917 s
+np.histogram (edges)              0.5993 s
+np.histogramdd                   16.8441 s
+np.histogramdd (edges)           13.7680 s
+torch.histogram                   0.3251 s
+torch.histogram (edges)           0.4217 s
+torch.histogramdd                 1.0528 s
+torch.histogramdd (edges)         1.1955 s
+torchist.histogram                0.4250 s
+torchist.histogram (edges)        0.6372 s
+torchist.histogramdd              1.6266 s
+torchist.histogramdd (edges)      3.8619 s
 
 CUDA
 ----
-torchist.histogram : 0.1363 s
-torchist.histogramdd : 0.3754 s
-torchist.histogram (non-uniform) : 0.1355 s
-torchist.histogramdd (non-uniform) : 0.5137 s
+torchist.histogram                0.1045 s
+torchist.histogram (edges)        0.0672 s
+torchist.histogramdd              0.0906 s
+torchist.histogramdd (edges)      0.1170 s
 ```

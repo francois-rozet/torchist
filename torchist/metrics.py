@@ -1,6 +1,10 @@
-r"""Miscellaneous metrics over distributions"""
+r"""Metrics over histograms"""
 
-from . import *
+import torch
+
+from torch import Tensor
+
+from .histograms import unravel_index
 
 
 def entropy(p: Tensor) -> Tensor:
@@ -10,16 +14,16 @@ def entropy(p: Tensor) -> Tensor:
         p: A dense or sparse histogram, (*,).
 
     Returns:
-        The entropy, (,).
+        The entropy, ().
     """
 
     if p.is_sparse:
         p = p.coalesce().values()
 
-    zero = p.new_tensor(0.)
+    zero = p.new_tensor(0.0)
 
     h = p * p.log()
-    h = torch.where(p > 0., h, zero)
+    h = torch.where(p > 0.0, h, zero)
 
     return -h.sum()
 
@@ -33,7 +37,7 @@ def kl_divergence(p: Tensor, q: Tensor, eps: float = 1e-42) -> Tensor:
         eps: A threshold value.
 
     Returns:
-        The divergence, (,).
+        The divergence, ().
     """
 
     if p.is_sparse:
@@ -48,10 +52,10 @@ def kl_divergence(p: Tensor, q: Tensor, eps: float = 1e-42) -> Tensor:
         kl = p * (log_p - log_q)
         kl = kl._values()
     else:
-        zero = p.new_tensor(0.)
+        zero = p.new_tensor(0.0)
 
         kl = p * (p.log() - q.clip(min=eps).log())
-        kl = torch.where(p > 0., kl, zero)
+        kl = torch.where(p > 0.0, kl, zero)
 
     return kl.sum()
 
@@ -67,7 +71,7 @@ def js_divergence(p: Tensor, q: Tensor, gamma: float = 0.5, **kwargs) -> Tensor:
         `**kwargs` are passed on to `kl_divergence`.
 
     Returns:
-        The divergence, (,).
+        The divergence, ().
     """
 
     m = gamma * p + (1 - gamma) * q
@@ -104,15 +108,14 @@ def sinkhorn_transport(
         The transport, (A, B).
 
     References:
-        [1] Sinkhorn Distances: Lightspeed Computation of Optimal Transportation Distances
-        (Cuturi, 2013)
-        https://arxiv.org/pdf/1306.0895.pdf
+        | Sinkhorn Distances: Lightspeed Computation of Optimal Transportation Distances (Cuturi, 2013)
+        | https://arxiv.org/pdf/1306.0895.pdf
     """
 
     K = (-gamma * M).exp()
     Kt = K.t().contiguous()
 
-    u = torch.full_like(r, 1. / len(r))
+    u = torch.full_like(r, 1 / len(r))
 
     for i in range(max_iter):
         v = c / (Kt @ u)
@@ -135,11 +138,10 @@ def em_distance(p: Tensor, q: Tensor, **kwargs) -> Tensor:
     Args:
         p: A dense or sparse histogram, (*,).
         q: A dense or sparse histogram, (*,).
-
-        `**kwargs` are passed on to `sinkhorn_transport`.
+        kwargs: Keyword arguments passed to `sinkhorn_transport`.
 
     Returns:
-        The distance, (,).
+        The distance, ().
     """
 
     shape = p.new_tensor(p.shape)
