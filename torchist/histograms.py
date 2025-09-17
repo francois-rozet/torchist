@@ -90,10 +90,10 @@ def histogramdd(
     bins: Union[int, Sequence[int]] = 10,
     low: Union[float, Sequence[float]] = None,
     upp: Union[float, Sequence[float]] = None,
+    edges: Union[Tensor, Sequence[Tensor]] = None,
     bound: bool = False,
     weights: Tensor = None,
     sparse: bool = False,
-    edges: Union[Tensor, Sequence[Tensor]] = None,
 ) -> Tensor:
     r"""Computes the multidimensional histogram of a tensor.
 
@@ -110,13 +110,13 @@ def histogramdd(
             the min of `x` is used instead.
         upp: The upper bound in each dimension, scalar or (D,). If `upp` is `None`,
             the max of `x` is used instead.
+        edges: The edges of the histogram. Either a vector or a list of vectors.
+            If provided, `bins`, `low` and `upp` are inferred from `edges`.
         bound: Whether `x` is bound by `low` and `upp`, included.
             If `False`, out-of-bounds values are filtered out.
         weights: A tensor of weights, (*,). Each sample of `x` contributes
             its associated weight towards the bin count (instead of 1).
         sparse: Whether the histogram is returned as a sparse tensor or not.
-        edges: The edges of the histogram. Either a vector or a list of vectors.
-            If provided, `bins`, `low` and `upp` are inferred from `edges`.
 
     Returns:
         The histogram, (*bins,).
@@ -139,19 +139,11 @@ def histogramdd(
         bins = edges.numel() - 1
         low = edges[0]
         upp = edges[-1]
-        edges = edges[:-1]  # the last edge is unnecessary in-bound values
     else:
         edges = [e.flatten().to(x) for e in edges]
         bins = [e.numel() - 1 for e in edges]
         low = [e[0] for e in edges]
         upp = [e[-1] for e in edges]
-
-        pack = x.new_full((D, max(bins)), float("inf"))
-
-        for i, e in enumerate(edges):
-            pack[i, : e.numel() - 1] = e[:-1]  # pad with inf
-
-        edges = pack
 
     bins = torch.as_tensor(bins, dtype=torch.long).squeeze()
     low = torch.as_tensor(low, dtype=x.dtype, device=x.device).squeeze()
@@ -174,10 +166,14 @@ def histogramdd(
     # Indexing
     if edges is None:
         idx = quantize(x, bins.to(device=x.device), low, upp)
-    elif edges.ndim > 1:
-        idx = torch.searchsorted(edges, x.t().contiguous(), right=True).t() - 1
+    elif torch.is_tensor(edges):
+        idx = torch.bucketize(x, edges[1:-1], right=True)
     else:
-        idx = torch.bucketize(x, edges, right=True) - 1
+        x = x.T.contiguous()
+        idx = torch.stack(
+            [torch.bucketize(x[i], edges[i][1:-1], right=True) for i in range(D)],
+            dim=-1,
+        )
 
     # Histogram
     shape = bins.expand(D).tolist()
