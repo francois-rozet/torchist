@@ -65,6 +65,7 @@ def out_of_bounds(x: Tensor, low: Tensor, upp: Tensor) -> BoolTensor:
     return torch.logical_or(a, b)
 
 
+@torch.no_grad()
 def quantize(x: Tensor, bins: Tensor, low: Tensor, upp: Tensor) -> LongTensor:
     r"""Maps the values of `x` to integers.
 
@@ -97,7 +98,8 @@ def histogramdd(
 ) -> Tensor:
     r"""Computes the multidimensional histogram of a tensor.
 
-    This is a `torch` implementation of `numpy.histogramdd`.
+    This is a `torch` implementation of `numpy.histogramdd`. This function is
+    differentiable with respect to `weights`, but not with respect to `x` and `edges`.
 
     Note:
         Similar to `numpy.histogram`, all bins are half-open except the last bin which
@@ -124,7 +126,7 @@ def histogramdd(
 
     # Preprocess
     D = x.shape[-1]
-    x = x.reshape(-1, D)
+    x = x.reshape(-1, D).detach()
 
     if edges is None:
         bound = bound or (low is None and upp is None)
@@ -135,12 +137,12 @@ def histogramdd(
         if upp is None:
             upp = x.max(dim=0).values
     elif torch.is_tensor(edges):
-        edges = edges.flatten().to(x)
+        edges = edges.flatten().detach().to(x)
         bins = edges.numel() - 1
         low = edges[0]
         upp = edges[-1]
     else:
-        edges = [e.flatten().to(x) for e in edges]
+        edges = [e.flatten().detach().to(x) for e in edges]
         bins = [e.numel() - 1 for e in edges]
         low = [e[0] for e in edges]
         upp = [e[-1] for e in edges]
