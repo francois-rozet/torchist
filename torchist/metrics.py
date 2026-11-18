@@ -131,6 +131,39 @@ def sinkhorn_transport(
     return u.view(-1, 1) * K * v
 
 
+def wasserstein_distance_1d(p: Tensor, q: Tensor, positions: Tensor = None) -> Tensor:
+    r"""Computes the exact Wasserstein-1 distance between histograms on a common line.
+
+    Args:
+        p: A dense or sparse vector of probability masses, (N,).
+        q: A dense or sparse vector of probability masses, (N,).
+        positions: Sorted bin centers, (N,). By default, adjacent bins are one unit apart.
+
+    Returns:
+        The distance in the units of the bin centers, ().
+    """
+
+    if p.ndim != 1 or q.shape != p.shape:
+        raise ValueError("Expected two one-dimensional histograms with the same shape.")
+    if positions is not None and positions.shape != p.shape:
+        raise ValueError("Expected one position per histogram bin.")
+
+    if p.is_sparse and q.is_sparse:
+        delta = (p - q).coalesce()
+        indices = delta.indices()[0]
+        positions = indices if positions is None else positions[indices]
+        mass = delta.values()
+    else:
+        mass = p.to_dense() - q.to_dense()
+
+    # Integrate the absolute difference between the two empirical CDFs.
+    cdf = mass.cumsum(dim=0)[:-1].abs()
+    if positions is not None:
+        cdf = cdf * (positions[1:] - positions[:-1])
+
+    return cdf.sum()
+
+
 def em_distance(p: Tensor, q: Tensor, **kwargs) -> Tensor:
     r"""Computes the regularized earth mover's distance between two distributions,
     assuming a unit Euclidean distance matrix.
