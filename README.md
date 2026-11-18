@@ -29,6 +29,18 @@ hist = torchist.histogramdd(x, bins=10, low=0.0, upp=1.0)
 print(hist.shape)  # (10, 10, 10)
 ```
 
+For histograms on a common one-dimensional grid, the exact Wasserstein distance
+can be computed from their cumulative masses. Sparse histograms can be passed directly.
+
+```python
+from torchist.metrics import wasserstein_distance_1d
+
+edges = torch.linspace(-4, 4, 101, device="cuda")
+p = torchist.histogram(torch.randn(10000, device="cuda"), edges=edges)
+q = torchist.histogram(torch.randn(10000, device="cuda") + 1, edges=edges)
+distance = wasserstein_distance_1d(p / p.sum(), q / q.sum(), (edges[:-1] + edges[1:]) / 2)
+```
+
 ## Benchmark
 
 The implementations of `torchist` are on par or faster than those of `numpy` and `torch` on CPU. On GPU (CUDA), they are much faster.
